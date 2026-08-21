@@ -116,8 +116,6 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
   as being of type `std::size_t` instead of `int`,
   matching the deduction of array sizes from `int(&)[N]`.
   This is a breaking change for code that depended on the previously deduced type. (#GH195033)
-- Clang now rejects C++ declarations that combine the `auto` type specifier
-  with another type specifier, such as `auto int`.
 - Clang now rejects nested local classes defined in a different
   block scope than their parent class. (#GH193472)
 
@@ -454,6 +452,11 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
   reproducable builds. These macros can be redefined from the command line if
   necessary. `/d1nodatetime-` can be used to turn this feature off if
   necessary to override the common build settings.
+
+- Added `-mscs-reg=<reg>` on Hexagon to select which callee-saved register
+  (`r16`-`r27`, default `r18`) holds the shadow call stack pointer under
+  `-fsanitize=shadow-call-stack`. The selected register must also be reserved
+  with the matching `-ffixed-<reg>`.
 
 ### Deprecated Compiler Flags
 
@@ -834,7 +837,9 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 - Fixed a crash in the constant evaluator when an ill-formed array new-expression whose bound could not be determined (e.g. `new int[]()`) was used in a constant expression. (#GH200139)
 - Fixed a case where function effect analysis (`nonblocking` etc.) did not visit a destructor invoked from a `delete` expression. (#GH184460)
 - Clang now defines the GCC-compatible predefined macros `__WCHAR_MIN__`, `__WINT_MIN__`, and `__SIG_ATOMIC_MIN__`. (#GH199678)
+- Clang now defines the GCC-compatible predefined macro `__SIG_ATOMIC_TYPE__`. (#GH213895)
 - Fix a crash in addUnsizedArray due assert not verifying we have a Base before doing checks on it. (#GH44212)
+- Fixed an assertion that could occur when rebuilding parenthesized list initialization expressions during template instantiation or AST transformation.
 
 #### Bug Fixes to Compiler Builtins
 
@@ -951,6 +956,9 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 - Fixed a assertion when `__block` is used on global variables in C mode. (#GH183974)
 - Added missing AST nodes representing the `decltype` specifiers in destructor call to AST.
 - Fixed a missing ODR violation diagnostic introduced by the inline assembly string or clobber list. (#GH198616)
+- Fixed a non-deterministic ordering of unused local typedefs that made
+  serialized PCH/AST files and `-Wunused-local-typedef` diagnostics
+  non-reproducible across runs. (#GH209639)
 
 #### Miscellaneous Bug Fixes
 
@@ -1140,11 +1148,28 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 
 #### AVR Support
 
+#### Hexagon Support
+
+- `H2` and `QURT` are now recognized as operating systems in the Hexagon
+  target triple. The driver can build against Picolibc for H2, and a
+  `--cstdlib` flag selects Picolibc.
+- RTSan, TySan, and the CFI indirect-call sanitizer now support Hexagon.
+  `-fsanitize=type` is enabled for Hexagon Linux.
+- `-ffixed-rXX` can now reserve caller-saved registers r16-r28.
+- ShadowCallStack (`-fsanitize=shadow-call-stack`) is supported.
+- The driver passes LTO options through to the Hexagon linker invocation.
+- `_GNU_SOURCE` is predefined for Hexagon C++ compilations.
+- `__HVX_IEEE_FP__` is defined when `-mhvx-ieee-fp` is enabled.
+
 #### SystemZ Support
 
 - Add support for `#pragma export` for z/OS. This is a pragma used to export functions and variables
   with external linkage from shared libraries. It provides compatibility with the IBM XL C/C++
   compiler.
+- Add support for variable argument lists on z/OS.
+- Add compare-and-swap builtin functions, as provided by the IBM C/C++ compiler for z/OS.
+- Add new wrapper headers for z/OS to improve compatibility with the system headers.
+- Raised minimal supported target OS level to z/OS 3.1.
 
 ### DWARF Support in Clang
 
@@ -1257,7 +1282,6 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 - Added a new `check::LifetimeEnd` callback that fires for each `CFGLifetimeEnds` element, which is useful for detecting dangling pointers. (#GH201123)
 - The `unix.StdCLibraryFunctions` standard-library summaries were optimized for binary size. (#GH202662)
 - Fixed the alignment of entries printed by `clang -cc1 -analyzer-print-analyzer-options` / `-analyzer-help`. (#GH190570)
-- Improved the models of `strchr`/`strrchr`/`memchr`/`strstr`/`strpbrk`/`strchrnul`, enabling `core.StackAddressEscape` to catch dangling pointers returned by these functions. (#GH203260)
 - Improved the modeling of symbolic ranges in the engine when calculating the largest and smallest possible values for range sets involving the `+`, `-`, and `*` binary operators. (#GH173113)
 
 #### Moved checkers
@@ -1278,6 +1302,10 @@ latest release, please see the [Clang Web Site](https://clang.llvm.org) or the
 ### Sanitizers
 
 - UndefinedBehaviorSanitizer now supports `__ubsan_default_suppressions`.
+- UndefinedBehaviorSanitizer now performs null, alignment, and array-bounds
+  checks for aggregate (as opposed to scalar) copy operations in C; for C++,
+  this applies to trivial copy/move operations and some cases remain
+  unchecked. (#GH190739, #GH203737)
 - Sanitizer Special Case Lists (`-fsanitize-ignorelist`) now support
   Version 4 of the Special Case List format, which introduces a transition
   period for leading dot-slash (`./`) canonicalization in path matching.
