@@ -65,6 +65,7 @@ if(LLVM_BUILD_INSTRUMENTED)
       COMMAND "${Python3_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/perf-helper.py merge ${LLVM_PROFDATA} ${CMAKE_CURRENT_BINARY_DIR}/clang.profdata ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_BINARY_DIR}/profiles/
       COMMENT "Merging profdata"
       DEPENDS clang ${CLANG_PGO_TRAINING_DEPS}
+      USES_TERMINAL
     )
     add_custom_target(generate-profdata DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/clang.profdata)
 
