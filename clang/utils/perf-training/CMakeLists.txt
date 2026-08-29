@@ -39,6 +39,18 @@ if(LLVM_BUILD_INSTRUMENTED)
   if(NOT LLVM_PROFDATA)
     message(STATUS "To enable merging PGO data LLVM_PROFDATA has to point to llvm-profdata")
   else()
+    # generate-profraw depends on clear-profraw, which deletes every .profraw under
+    # ${CMAKE_BINARY_DIR}/profiles/ -- including what the external training project
+    # wrote there. So the external project has to be built after generate-profraw and
+    # before the merge, as a step of the same command, rather than as a target-level
+    # dependency of generate-profdata (which would order it before this command).
+    set(generate_profraw_external)
+    if (CLANG_PGO_TRAINING_DATA_SOURCE_DIR)
+      llvm_ExternalProject_Add(generate-profraw-external ${CLANG_PGO_TRAINING_DATA_SOURCE_DIR}
+              USE_TOOLCHAIN EXCLUDE_FROM_ALL NO_INSTALL)
+      set(generate_profraw_external
+        COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target generate-profraw-external)
+    endif()
     add_custom_command(
       OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/clang.profdata
       # generate-profraw is a custom_target which are always considered stale.
@@ -49,16 +61,12 @@ if(LLVM_BUILD_INSTRUMENTED)
       # Therefor we call the generate-profraw target manually as part of this custom
       # command, which will only run if clang or ${CLANG_PGO_TRAINING_DEPS} are updated.
       COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target generate-profraw
+      ${generate_profraw_external}
       COMMAND "${Python3_EXECUTABLE}" ${CMAKE_CURRENT_SOURCE_DIR}/perf-helper.py merge ${LLVM_PROFDATA} ${CMAKE_CURRENT_BINARY_DIR}/clang.profdata ${CMAKE_CURRENT_BINARY_DIR} ${CMAKE_BINARY_DIR}/profiles/
       COMMENT "Merging profdata"
       DEPENDS clang ${CLANG_PGO_TRAINING_DEPS}
     )
     add_custom_target(generate-profdata DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/clang.profdata)
-    if (CLANG_PGO_TRAINING_DATA_SOURCE_DIR)
-      llvm_ExternalProject_Add(generate-profraw-external ${CLANG_PGO_TRAINING_DATA_SOURCE_DIR}
-              USE_TOOLCHAIN EXLUDE_FROM_ALL NO_INSTALL DEPENDS generate-profraw)
-      add_dependencies(generate-profdata generate-profraw-external)
-    endif()
 
     if(NOT LLVM_PROFGEN)
       find_program(LLVM_PROFGEN llvm-profgen)
