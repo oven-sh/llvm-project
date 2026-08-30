@@ -93,6 +93,9 @@ class ChunkHeader {
   atomic_uint8_t chunk_state;
   u8 alloc_type : 2;
   u8 lsan_tag : 2;
+  // A zero-size request, allocated as one poisoned byte (see Allocate). Size
+  // queries report 0 for it so that the reported size is addressable.
+  u8 from_zero_alloc : 1;
 
   // align < 8 -> 0
   // else      -> log2(min(align, 512)) - 2
@@ -610,6 +613,7 @@ struct Allocator {
     uptr chunk_beg = user_beg - kChunkHeaderSize;
     AsanChunk *m = reinterpret_cast<AsanChunk *>(chunk_beg);
     m->alloc_type = alloc_type;
+    m->from_zero_alloc = upgraded_from_zero;
     CHECK(size);
     m->SetUsedSize(size);
     m->user_requested_alignment_log = user_requested_alignment_log;
@@ -860,6 +864,12 @@ struct Allocator {
       return 0;
     if (m->Beg() != p) return 0;
     return m->UsedSize();
+  }
+
+  // True if the live allocation at p was a zero-size request (its one byte is
+  // poisoned, so its usable size is 0, not UsedSize()).
+  bool FromZeroAllocation(uptr p) {
+    return reinterpret_cast<AsanChunk *>(p - kChunkHeaderSize)->from_zero_alloc;
   }
 
   uptr AllocationSizeFast(uptr p) {
@@ -1114,6 +1124,13 @@ uptr asan_malloc_usable_size(const void *ptr, uptr pc, uptr bp) {
     GET_STACK_TRACE_FATAL(pc, bp);
     ReportMallocUsableSizeNotOwned((uptr)ptr, &stack);
   }
+  // malloc(0) is one poisoned byte internally (so the pointer is unique and any
+  // dereference is reported); none of it is usable.
+  if (usable_size > 0 &&
+      instance.FromZeroAllocation(reinterpret_cast<uptr>(ptr))) {
+    DCHECK_EQ(usable_size, 1);
+    return 0;
+  }
   return usable_size;
 }
 
@@ -1211,7 +1228,12 @@ void asan_delete_array_sized_aligned(void *ptr, uptr size, uptr alignment,
 }
 
 uptr asan_mz_size(const void *ptr) {
-  return instance.AllocationSize(reinterpret_cast<uptr>(ptr));
+  uptr size = instance.AllocationSize(reinterpret_cast<uptr>(ptr));
+  if (size > 0 && instance.FromZeroAllocation(reinterpret_cast<uptr>(ptr))) {
+    DCHECK_EQ(size, 1);
+    return 0;
+  }
+  return size;
 }
 
 void asan_mz_force_lock() SANITIZER_NO_THREAD_SAFETY_ANALYSIS {
