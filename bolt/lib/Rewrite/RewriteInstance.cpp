@@ -4958,6 +4958,10 @@ RewriteInstance::getOutputSections(ELFObjectFile<ELFT> *File,
     ELFShdrTy NewSection = Section;
     NewSection.sh_offset = BinSec->getOutputFileOffset();
     NewSection.sh_size = BinSec->getOutputSize();
+    // A section BOLT regenerated holds plain contents even if the input's was
+    // ELF-compressed (-gz debug sections); one copied through keeps its flag.
+    if (willOverwriteSection(SectionName))
+      NewSection.sh_flags &= ~static_cast<decltype(NewSection.sh_flags)>(ELF::SHF_COMPRESSED);
 
     if (NewSection.sh_type == ELF::SHT_SYMTAB)
       NewSection.sh_info = NumLocalSymbols;

@@ -1170,19 +1170,24 @@ void DwarfLineTable::emitCU(MCStreamer *MCOS, MCDwarfLineTableParams Params,
 // Bonus is that when we output a final binary we can reuse .debug_line_str
 // section. So we don't have to do the SHF_ALLOC trick we did with
 // .debug_line.
-static void parseAndPopulateDebugLineStr(BinarySection &LineStrSection,
+//
+// The contents come from the DWARF object rather than the input BinarySection: the DWARF
+// object holds them decompressed when the section is SHF_COMPRESSED (-gz), the
+// BinarySection holds the raw file bytes.
+static void parseAndPopulateDebugLineStr(StringRef LineStrContents,
                                          MCDwarfLineStr &LineStr,
                                          BinaryContext &BC) {
-  DataExtractor StrData(LineStrSection.getContents(),
-                        BC.DwCtx->isLittleEndian(), 0);
+  DataExtractor StrData(LineStrContents, BC.DwCtx->isLittleEndian(), 0);
   uint64_t Offset = 0;
   while (StrData.isValidOffset(Offset)) {
     const uint64_t StrOffset = Offset;
     Error Err = Error::success();
     const char *CStr = StrData.getCStr(&Offset, &Err);
     if (Err) {
-      BC.errs() << "BOLT-ERROR: could not extract string from .debug_line_str";
-      continue;
+      // getCStr does not advance Offset on failure: stop, or this never terminates.
+      BC.errs() << "BOLT-ERROR: could not extract string from .debug_line_str at offset 0x"
+                << Twine::utohexstr(StrOffset) << ": " << toString(std::move(Err)) << "\n";
+      break;
     }
     const size_t NewOffset = LineStr.addString(CStr);
     assert(StrOffset == NewOffset &&
@@ -1206,14 +1211,12 @@ void DwarfLineTable::emit(BinaryContext &BC, MCStreamer &Streamer) {
     return;
   // In a v5 non-split line table, put the strings in a separate section.
   std::optional<MCDwarfLineStr> LineStr;
-  ErrorOr<BinarySection &> LineStrSection =
-      BC.getUniqueSectionByName(".debug_line_str");
-
   // Some versions of GCC output DWARF5 .debug_info, but DWARF4 or lower
   // .debug_line, so need to check if section exists.
-  if (LineStrSection) {
+  if (BC.getUniqueSectionByName(".debug_line_str")) {
     LineStr.emplace(*BC.Ctx);
-    parseAndPopulateDebugLineStr(*LineStrSection, *LineStr, BC);
+    parseAndPopulateDebugLineStr(BC.DwCtx->getDWARFObj().getLineStrSection(),
+                                 *LineStr, BC);
   }
 
   // Switch to the section where the table will be emitted into.
