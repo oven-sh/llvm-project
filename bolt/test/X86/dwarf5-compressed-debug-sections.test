@@ -1,0 +1,33 @@
+# REQUIRES: system-linux
+
+## Check that BOLT handles ELF-compressed (SHF_COMPRESSED) input debug sections: .debug_line_str,
+## which BOLT parses itself, must be read decompressed (it used to loop forever on the compressed
+## bytes), and the debug sections BOLT regenerates must not be marked compressed in the output.
+
+# RUN: split-file %s %t
+# RUN: %clang %cflags -O1 -g -gdwarf-5 -gz=zlib -c %t/a-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c -o %t/a.o
+# RUN: %clang %cflags -O1 -g -gdwarf-5 -gz=zlib -c %t/another-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c -o %t/b.o
+# RUN: %clang %cflags %t/a.o %t/b.o -o %t.exe -Wl,-q -Wl,--compress-debug-sections=zlib
+# RUN: llvm-readelf -S %t.exe | FileCheck --check-prefix=PRECHECK %s
+# RUN: llvm-bolt %t.exe -o %t.bolt --update-debug-sections
+# RUN: llvm-readelf -S %t.bolt | FileCheck --check-prefix=SECTIONS %s
+# RUN: llvm-dwarfdump --debug-line %t.bolt | FileCheck --check-prefix=LINES %s
+# RUN: llvm-dwarfdump --verify %t.bolt 2>&1 | FileCheck --check-prefix=VERIFY %s
+
+# PRECHECK: .debug_line PROGBITS {{[0-9a-f]+}} {{[0-9a-f]+}} {{[0-9a-f]+}} 00 C 0
+# PRECHECK: .debug_line_str PROGBITS {{[0-9a-f]+}} {{[0-9a-f]+}} {{[0-9a-f]+}} 01 MSC 0
+
+# SECTIONS: .debug_info PROGBITS {{[0-9a-f]+}} {{[0-9a-f]+}} {{[0-9a-f]+}} 00 0
+# SECTIONS: .debug_line PROGBITS {{[0-9a-f]+}} {{[0-9a-f]+}} {{[0-9a-f]+}} 00 0
+# SECTIONS: .debug_line_str PROGBITS {{[0-9a-f]+}} {{[0-9a-f]+}} {{[0-9a-f]+}} 01 MS 0
+
+# LINES: name: "a-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c"
+# LINES: name: "another-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c"
+
+# VERIFY: No errors.
+
+#--- a-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c
+int work(int n) { int s = 0; for (int i = 0; i < n; i++) s += i * i; return s; }
+int main(void) { return work(10) & 1; }
+#--- another-source-file-with-a-name-long-enough-for-the-line-string-table-to-be-worth-compressing.c
+int more(int n) { int s = 1; for (int i = 1; i < n; i++) s *= i; return s; }
