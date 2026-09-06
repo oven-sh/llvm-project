@@ -91,6 +91,21 @@ static void checkAndSetWeakAlias(SymbolTable &symtab, InputFile *f,
         // this weak symbol.
         if (symtab.ctx.config.allowDuplicateWeak)
           return;
+        // A weak *reference* (`__attribute__((weak))` on a declaration)
+        // makes every referencing object carry its own default for the
+        // symbol: an absolute symbol with value 0, uniquely named
+        // (.weak.<sym>.default.<other>). Several objects referencing the
+        // same symbol - or one, once ThinLTO imports the referencing
+        // function elsewhere - then bring several such defaults. They all
+        // mean "null if undefined"; that is not a conflict.
+        auto absoluteValue = [](Symbol *s) -> std::optional<uint64_t> {
+          if (auto *da = dyn_cast<DefinedAbsolute>(s))
+            return da->getVA();
+          return std::nullopt;
+        };
+        std::optional<uint64_t> existing = absoluteValue(u->weakAlias);
+        if (existing && existing == absoluteValue(target))
+          return;
         symtab.reportDuplicate(source, f);
       }
     }
